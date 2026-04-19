@@ -4196,32 +4196,33 @@ export class Binder extends ParseTreeWalker {
                         symbolWithScope.symbol.setIsInstanceMember();
                     }
 
-                    // Look for an 'InitVar' either by itself or wrapped in an 'Annotated'.
-                    if (typeAnnotation.nodeType === ParseNodeType.Index) {
-                        if (this._isDataclassesAnnotation(typeAnnotation.d.leftExpr, 'InitVar')) {
-                            symbolWithScope.symbol.setIsInitVar();
-                        } else if (
-                            this._isTypingAnnotation(typeAnnotation.d.leftExpr, 'Annotated') &&
-                            typeAnnotation.d.items.length > 0
+                    // Look for an 'InitVar' or 'KW_ONLY' either by itself or wrapped in 'Annotated' / '@'.
+                    let unwrappedAnnotation: ExpressionNode = typeAnnotation;
+                    while (true) {
+                        if (
+                            unwrappedAnnotation.nodeType === ParseNodeType.Index &&
+                            this._isTypingAnnotation(unwrappedAnnotation.d.leftExpr, 'Annotated') &&
+                            unwrappedAnnotation.d.items.length > 0
                         ) {
-                            const item0Expr = typeAnnotation.d.items[0].d.valueExpr;
-                            if (
-                                item0Expr.nodeType === ParseNodeType.Index &&
-                                this._isDataclassesAnnotation(item0Expr.d.leftExpr, 'InitVar')
-                            ) {
-                                symbolWithScope.symbol.setIsInitVar();
-                            }
+                            unwrappedAnnotation = unwrappedAnnotation.d.items[0].d.valueExpr;
+                        } else if (
+                            unwrappedAnnotation.nodeType === ParseNodeType.BinaryOperation &&
+                            unwrappedAnnotation.d.operator === OperatorType.MatrixMultiply
+                        ) {
+                            unwrappedAnnotation = unwrappedAnnotation.d.leftExpr;
+                        } else {
+                            break;
                         }
                     }
 
-                    if (this._isDataclassesAnnotation(typeAnnotation, 'KW_ONLY')) {
-                        symbolWithScope.symbol.setIsDataClassKeywordOnly();
-                    } else if (
-                        typeAnnotation.nodeType === ParseNodeType.Index &&
-                        this._isTypingAnnotation(typeAnnotation.d.leftExpr, 'Annotated') &&
-                        typeAnnotation.d.items.length > 0 &&
-                        this._isDataclassesAnnotation(typeAnnotation.d.items[0].d.valueExpr, 'KW_ONLY')
+                    if (
+                        unwrappedAnnotation.nodeType === ParseNodeType.Index &&
+                        this._isDataclassesAnnotation(unwrappedAnnotation.d.leftExpr, 'InitVar')
                     ) {
+                        symbolWithScope.symbol.setIsInitVar();
+                    }
+
+                    if (this._isDataclassesAnnotation(unwrappedAnnotation, 'KW_ONLY')) {
                         symbolWithScope.symbol.setIsDataClassKeywordOnly();
                     }
                 }
@@ -4373,6 +4374,11 @@ export class Binder extends ParseTreeWalker {
                 this._isTypingAnnotation(typeAnnotation.d.leftExpr, 'Annotated')
             ) {
                 return this._isAnnotationFinal(typeAnnotation.d.items[0].d.valueExpr);
+            } else if (
+                typeAnnotation.nodeType === ParseNodeType.BinaryOperation &&
+                typeAnnotation.d.operator === OperatorType.MatrixMultiply
+            ) {
+                return this._isAnnotationFinal(typeAnnotation.d.leftExpr);
             } else if (typeAnnotation.nodeType === ParseNodeType.Index && typeAnnotation.d.items.length === 1) {
                 // Recursively call to see if the base expression is "Final".
                 const finalInfo = this._isAnnotationFinal(typeAnnotation.d.leftExpr);
@@ -4410,6 +4416,11 @@ export class Binder extends ParseTreeWalker {
                 this._isTypingAnnotation(typeAnnotation.d.leftExpr, 'Annotated')
             ) {
                 typeAnnotation = typeAnnotation.d.items[0].d.valueExpr;
+            } else if (
+                typeAnnotation.nodeType === ParseNodeType.BinaryOperation &&
+                typeAnnotation.d.operator === OperatorType.MatrixMultiply
+            ) {
+                typeAnnotation = typeAnnotation.d.leftExpr;
             } else if (this._isTypingAnnotation(typeAnnotation, 'ClassVar')) {
                 isClassVar = true;
                 break;

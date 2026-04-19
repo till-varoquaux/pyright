@@ -225,6 +225,7 @@ export interface PrefetchedTypes {
     supportsKeysAndGetItemClass: Type;
     mappingClass: Type;
     templateClass: Type;
+    annotatedTypeClass: Type;
 }
 
 export interface TypeResult<T extends Type = Type> {
@@ -880,6 +881,7 @@ export interface TypeEvaluator {
     getObjectType: () => Type;
     getNoneType: () => Type;
     getUnionClassType(): Type;
+    getAnnotatedClassType(): Type;
     getTypeClassType(): ClassType | undefined;
     getFunctionClassType(type: FunctionType | OverloadedType): ClassType | undefined;
     getTypingType: (node: ParseNode, symbolName: string) => Type | undefined;

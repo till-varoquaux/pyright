@@ -10,7 +10,7 @@
 
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { DiagnosticRule } from '../common/diagnosticRules';
-import { PythonVersion, pythonVersion3_10 } from '../common/pythonVersion';
+import { PythonVersion, pythonVersion3_10, pythonVersion3_16 } from '../common/pythonVersion';
 import { LocMessage } from '../localization/localize';
 import {
     AugmentedAssignmentNode,
@@ -252,6 +252,7 @@ export function getTypeOfBinaryOperation(
     inferenceContext: InferenceContext | undefined,
     nodeInfo: AnalyzerNodeInfoAccessor
 ): TypeResult {
+    const fileInfo = nodeInfo.getFileInfo(node);
     const leftExpression = node.d.leftExpr;
     let rightExpression = node.d.rightExpr;
     let isIncomplete = false;
@@ -306,6 +307,21 @@ export function getTypeOfBinaryOperation(
     );
     let leftType = leftTypeResult.type;
 
+    let rightFlags = flags;
+    if (
+        node.d.operator === OperatorType.MatrixMultiply &&
+        PythonVersion.isGreaterOrEqualTo(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_16) &&
+        !customMetaclassSupportsMethod(leftType, '__matmul__') &&
+        isUnionable(leftType, leftType)
+    ) {
+        // If it's a type on the left, treat the right side as metadata.
+        // If we are in a type expression, we'll use EvalFlags.None to avoid
+        // interpreting string literals as forward references.
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            rightFlags = EvalFlags.None;
+        }
+    }
+
     if (!expectedOperandType) {
         if (node.d.operator === OperatorType.Or || node.d.operator === OperatorType.And) {
             // For "or" and "and", use the type of the left operand under certain
@@ -338,7 +354,7 @@ export function getTypeOfBinaryOperation(
 
     const rightTypeResult = evaluator.getTypeOfExpression(
         rightExpression,
-        flags,
+        rightFlags,
         makeInferenceContext(expectedOperandType)
     );
     let rightType = rightTypeResult.type;
@@ -388,9 +404,22 @@ export function getTypeOfBinaryOperation(
         }
     }
 
+    // Is this a "@" operator used in a context where it is supposed to be
+    // interpreted as an annotated operator?
+    if (
+        node.d.operator === OperatorType.MatrixMultiply &&
+        PythonVersion.isGreaterOrEqualTo(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_16) &&
+        !customMetaclassSupportsMethod(leftType, '__matmul__') &&
+        !customMetaclassSupportsMethod(rightType, '__rmatmul__')
+    ) {
+        if (isUnionable(leftType, leftType)) {
+            return createAnnotatedTypeViaMatMul(evaluator, node, flags, leftTypeResult, rightTypeResult);
+        }
+    }
+
     if ((flags & EvalFlags.TypeExpression) !== 0) {
-        // Exempt "|" because it might be a union operation involving unknowns.
-        if (node.d.operator !== OperatorType.BitwiseOr) {
+        // Exempt "|" and "@" because they might be a union or annotated operation involving unknowns.
+        if (node.d.operator !== OperatorType.BitwiseOr && node.d.operator !== OperatorType.MatrixMultiply) {
             evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.binaryOperationNotAllowed(), node);
             return { type: UnknownType.create() };
         }
@@ -916,6 +945,30 @@ function createUnionType(
     }
 
     return { type: newUnion };
+}
+
+function createAnnotatedTypeViaMatMul(
+    evaluator: TypeEvaluator,
+    node: BinaryOperationNode,
+    flags: EvalFlags,
+    leftTypeResult: TypeResult,
+    rightTypeResult: TypeResult
+): TypeResult {
+    const annotatedClass = evaluator.getAnnotatedClassType();
+    let newType = leftTypeResult.type;
+
+    if (annotatedClass && isInstantiableClass(annotatedClass)) {
+        newType = TypeBase.cloneAsSpecialForm(newType, ClassType.cloneAsInstance(annotatedClass));
+    }
+
+    return {
+        type: newType,
+        isIncomplete: leftTypeResult.isIncomplete || rightTypeResult.isIncomplete,
+        typeErrors: leftTypeResult.typeErrors || rightTypeResult.typeErrors,
+        isReadOnly: leftTypeResult.isReadOnly,
+        isRequired: leftTypeResult.isRequired,
+        isNotRequired: leftTypeResult.isNotRequired,
+    };
 }
 
 // Attempts to apply "literal math" for a literal operands.

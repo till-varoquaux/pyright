@@ -3758,7 +3758,12 @@ export class Parser {
             nextOperator === OperatorType.FloorDivide
         ) {
             this._getNextToken();
+            const wasParsingTypeAnnotation = this._isParsingTypeAnnotation;
+            if (nextOperator === OperatorType.MatrixMultiply) {
+                this._isParsingTypeAnnotation = false;
+            }
             const rightExpr = this._parseArithmeticFactor();
+            this._isParsingTypeAnnotation = wasParsingTypeAnnotation;
             leftExpr = this._createBinaryOperationNode(leftExpr, rightExpr, peekToken, nextOperator);
             peekToken = this._peekToken();
             nextOperator = this._peekOperatorType();

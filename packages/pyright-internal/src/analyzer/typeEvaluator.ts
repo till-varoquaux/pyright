@@ -1321,6 +1321,11 @@ export function createTypeEvaluator(
                 prefetched.unionTypeClass.shared.flags |= ClassTypeFlags.SpecialFormClass;
             }
 
+            prefetched.annotatedTypeClass = getTypingType(node, 'Annotated') ?? UnknownType.create();
+            if (prefetched.annotatedTypeClass && isClass(prefetched.annotatedTypeClass)) {
+                prefetched.annotatedTypeClass.shared.flags |= ClassTypeFlags.SpecialFormClass;
+            }
+
             // Initialize and cache "Collection" to break a cyclical dependency
             // that occurs when resolving tuple below.
             getTypingType(node, 'Collection');
@@ -1626,9 +1631,13 @@ export function createTypeEvaluator(
             case ParseNodeType.BinaryOperation: {
                 let effectiveFlags = flags;
 
-                // If we're expecting an instantiable type and this isn't a union operator,
+                // If we're expecting an instantiable type and this isn't a union or @ operator,
                 // don't require that the two operands are also instantiable types.
-                if (expectingInstantiable && node.d.operator !== OperatorType.BitwiseOr) {
+                if (
+                    expectingInstantiable &&
+                    node.d.operator !== OperatorType.BitwiseOr &&
+                    node.d.operator !== OperatorType.MatrixMultiply
+                ) {
                     effectiveFlags &= ~EvalFlags.InstantiableType;
                 }
 
@@ -3851,6 +3860,10 @@ export function createTypeEvaluator(
 
     function getUnionClassType(): Type {
         return prefetched?.unionTypeClass ?? UnknownType.create();
+    }
+
+    function getAnnotatedClassType(): Type {
+        return prefetched?.annotatedTypeClass ?? UnknownType.create();
     }
 
     function getTypeClassType(): ClassType | undefined {
@@ -30734,11 +30747,16 @@ export function createTypeEvaluator(
                 return node.d.constType === KeywordType.None;
 
             case ParseNodeType.BinaryOperation:
-                return (
-                    node.d.operator === OperatorType.BitwiseOr &&
-                    isLegalTypeAliasExpressionForm(node.d.leftExpr, /* allowStrLiteral */ true) &&
-                    isLegalTypeAliasExpressionForm(node.d.rightExpr, /* allowStrLiteral */ true)
-                );
+                if (node.d.operator === OperatorType.BitwiseOr) {
+                    return (
+                        isLegalTypeAliasExpressionForm(node.d.leftExpr, /* allowStrLiteral */ true) &&
+                        isLegalTypeAliasExpressionForm(node.d.rightExpr, /* allowStrLiteral */ true)
+                    );
+                }
+                if (node.d.operator === OperatorType.MatrixMultiply) {
+                    return isLegalTypeAliasExpressionForm(node.d.leftExpr, allowStrLiteral);
+                }
+                return false;
 
             case ParseNodeType.Index:
                 return isLegalTypeAliasExpressionForm(node.d.leftExpr, allowStrLiteral);
@@ -31067,6 +31085,7 @@ export function createTypeEvaluator(
         getObjectType,
         getNoneType,
         getUnionClassType,
+        getAnnotatedClassType,
         getTypeClassType,
         getFunctionClassType,
         getBuiltInObject,
